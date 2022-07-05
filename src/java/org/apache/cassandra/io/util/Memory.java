@@ -108,7 +108,10 @@ public class Memory implements AutoCloseable, ReadableMemory
         checkBounds(offset, offset + 8);
         if (Architecture.IS_UNALIGNED)
         {
-            unsafe.putLong(peer + offset, l);
+	    if (bigEndian)
+		unsafe.putLong(peer + offset, Long.reverseBytes(l));
+	    else
+                unsafe.putLong(peer + offset, l);
         }
         else
         {
@@ -147,7 +150,10 @@ public class Memory implements AutoCloseable, ReadableMemory
         checkBounds(offset, offset + 4);
         if (Architecture.IS_UNALIGNED)
         {
-            unsafe.putInt(peer + offset, l);
+	    if (bigEndian)
+		unsafe.putInt(peer + offset, Integer.reverseBytes(l));
+	    else
+                unsafe.putInt(peer + offset, l);
         }
         else
         {
@@ -178,7 +184,10 @@ public class Memory implements AutoCloseable, ReadableMemory
         checkBounds(offset, offset + 2);
         if (Architecture.IS_UNALIGNED)
         {
-            unsafe.putShort(peer + offset, l);
+	    if (bigEndian)
+		unsafe.putShort(peer + offset, Short.reverseBytes(l));
+	    else
+                unsafe.putShort(peer + offset, l);
         }
         else
         {
@@ -253,7 +262,11 @@ public class Memory implements AutoCloseable, ReadableMemory
         checkBounds(offset, offset + 8);
         if (Architecture.IS_UNALIGNED)
         {
-            return unsafe.getLong(peer + offset);
+	    long value = unsafe.getLong(peer+offset);
+	    if (bigEndian)
+		return Long.reverseBytes(value);
+	    else
+		return value;
         } else {
             return getLongByByte(peer + offset);
         }
@@ -290,7 +303,11 @@ public class Memory implements AutoCloseable, ReadableMemory
         checkBounds(offset, offset + 4);
         if (Architecture.IS_UNALIGNED)
         {
-            return unsafe.getInt(peer + offset);
+	    int value = unsafe.getInt(peer+offset);
+	    if (bigEndian)
+		return Integer.reverseBytes(value);
+	    else
+		return value;
         }
         else
         {

@@ -110,13 +110,19 @@ public abstract class MemoryUtil
 
     public static void setShort(long address, short s)
     {
-        unsafe.putShort(address, s);
+	if (BIG_ENDIAN)
+	    unsafe.putShort(address, Short.reverseBytes(s));
+	else
+            unsafe.putShort(address, s);
     }
 
     public static void setInt(long address, int l)
     {
         if (Architecture.IS_UNALIGNED)
-            unsafe.putInt(address, l);
+	    if (BIG_ENDIAN)
+		unsafe.putInt(address, Integer.reverseBytes(l));
+	    else
+                unsafe.putInt(address, l);
         else
             putIntByByte(address, l);
     }
@@ -124,7 +130,10 @@ public abstract class MemoryUtil
     public static void setLong(long address, long l)
     {
         if (Architecture.IS_UNALIGNED)
-            unsafe.putLong(address, l);
+	    if (BIG_ENDIAN)
+		unsafe.putLong(address, Long.reverseBytes(l));
+	    else
+                unsafe.putLong(address, l);
         else
             putLongByByte(address, l);
     }
@@ -136,17 +145,47 @@ public abstract class MemoryUtil
 
     public static int getShort(long address)
     {
-        return (Architecture.IS_UNALIGNED ? unsafe.getShort(address) : getShortByByte(address)) & 0xffff;
+	if (Architecture.IS_UNALIGNED)
+	{
+	    short value = unsafe.getShort(address);
+	    if (BIG_ENDIAN)
+	    {
+		value = Short.reverseBytes(value);
+		return value & 0xffff;
+	    }
+	    else
+		return value & 0xffff;
+	}
+	else
+	    return getShortByByte(address) & 0xffff;
     }
 
     public static int getInt(long address)
     {
-        return Architecture.IS_UNALIGNED ? unsafe.getInt(address) : getIntByByte(address);
+	if (Architecture.IS_UNALIGNED)
+	{
+	    int value = unsafe.getInt(address);
+	    if (BIG_ENDIAN)
+		return Integer.reverseBytes(value);
+	    else
+		return value;
+	}
+	else
+	    return getIntByByte(address);
     }
 
     public static long getLong(long address)
     {
-        return Architecture.IS_UNALIGNED ? unsafe.getLong(address) : getLongByByte(address);
+	if (Architecture.IS_UNALIGNED)
+	{
+	    long value = unsafe.getLong(address);
+	    if (BIG_ENDIAN)
+		return Long.reverseBytes(value);
+	    else
+		return value;
+	}
+	else
+	    return getLongByByte(address);
     }
 
     public static ByteBuffer getByteBuffer(long address, int length)
