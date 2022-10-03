@@ -287,34 +287,7 @@ pipeline {
                   }
               }
             }
-          }
-          stage('jvm-dtest-upgrade') {
-            steps {
-              script {
-                  def attempt = 1
-                  while (attempt <=2) {
-                    if (attempt > 1) {
-                      sleep(60 * attempt)
-                    }
-                    attempt = attempt + 1
-                    jvm_dtest_upgrade = build job: "${env.JOB_NAME}-jvm-dtest-upgrade", propagate: false
-                    if (jvm_dtest_upgrade.result != 'FAILURE') break
-                }
-                if (jvm_dtest_upgrade.result != 'SUCCESS') unstable('jvm-dtest-upgrade failures')
-                if (jvm_dtest_upgrade.result == 'FAILURE') currentBuild.result='FAILURE'
-              }
-            }
-            post {
-              always {
-                  warnError('missing test xml files') {
-                      script {
-                          copyTestResults('jvm-dtest-upgrade', jvm_dtest_upgrade.getNumber())
-                      }
-                  }
-              }
-            } 
-          }       
-         
+          }         
         }
     }
     stage('Summary') {
