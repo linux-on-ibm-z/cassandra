@@ -18,6 +18,7 @@
 #
 
 BASEDIR=`dirname $0`
+BASE_BRANCH=trunk
 
 die ()
 {
@@ -38,16 +39,32 @@ print_help()
   echo "   -e <key=value> Environment variables to be used in the generated config.yml, e.g.:"
   echo "                   -e DTEST_BRANCH=CASSANDRA-8272"
   echo "                   -e DTEST_REPO=https://github.com/adelapena/cassandra-dtest.git"
-  echo "                   -e REPEATED_UTEST_TARGET=testsome"
-  echo "                   -e REPEATED_UTEST_CLASS=org.apache.cassandra.cql3.ViewTest"
-  echo "                   -e REPEATED_UTEST_METHODS=testCompoundPartitionKey,testStaticTable"
-  echo "                   -e REPEATED_UTEST_VNODES=false"
-  echo "                   -e REPEATED_UTEST_COUNT=100"
-  echo "                   -e REPEATED_UTEST_STOP_ON_FAILURE=false"
-  echo "                   -e REPEATED_DTEST_NAME=cqlsh_tests/test_cqlsh.py::TestCqlshSmoke"
-  echo "                   -e REPEATED_DTEST_VNODES=false"
-  echo "                   -e REPEATED_DTEST_COUNT=100"
-  echo "                   -e REPEATED_DTEST_STOP_ON_FAILURE=false"
+  echo "                   -e REPEATED_TESTS_STOP_ON_FAILURE=false"
+  echo "                   -e REPEATED_UTESTS=org.apache.cassandra.cql3.ViewTest#testCountersTable"
+  echo "                   -e REPEATED_UTESTS_COUNT=500"
+  echo "                   -e REPEATED_UTESTS_FQLTOOL=org.apache.cassandra.fqltool.FQLCompareTest"
+  echo "                   -e REPEATED_UTESTS_FQLTOOL_COUNT=500"
+  echo "                   -e REPEATED_UTESTS_LONG=org.apache.cassandra.db.commitlog.CommitLogStressTest"
+  echo "                   -e REPEATED_UTESTS_LONG_COUNT=100"
+  echo "                   -e REPEATED_UTESTS_STRESS=org.apache.cassandra.stress.generate.DistributionGaussianTest"
+  echo "                   -e REPEATED_UTESTS_STRESS_COUNT=500"
+  echo "                   -e REPEATED_SIMULATOR_DTESTS=org.apache.cassandra.simulator.test.TrivialSimulationTest"
+  echo "                   -e REPEATED_SIMULATOR_DTESTS_COUNT=500"
+  echo "                   -e REPEATED_JVM_DTESTS=org.apache.cassandra.distributed.test.PagingTest"
+  echo "                   -e REPEATED_JVM_DTESTS_COUNT=500"
+  echo "                   -e REPEATED_JVM_UPGRADE_DTESTS=org.apache.cassandra.distributed.upgrade.GroupByTest"
+  echo "                   -e REPEATED_JVM_UPGRADE_DTESTS_COUNT=500"
+  echo "                   -e REPEATED_DTESTS=cdc_test.py cqlsh_tests/test_cqlsh.py::TestCqlshSmoke"
+  echo "                   -e REPEATED_DTESTS_COUNT=500"
+  echo "                   -e REPEATED_LARGE_DTESTS=consistency_test.py::TestAvailability::test_network_topology_strategy"
+  echo "                   -e REPEATED_LARGE_DTESTS=100"
+  echo "                   -e REPEATED_UPGRADE_DTESTS=upgrade_tests/cql_tests.py upgrade_tests/paging_test.py"
+  echo "                   -e REPEATED_UPGRADE_DTESTS_COUNT=25"
+  echo "                   -e REPEATED_ANT_TEST_TARGET=testsome"
+  echo "                   -e REPEATED_ANT_TEST_CLASS=org.apache.cassandra.cql3.ViewTest"
+  echo "                   -e REPEATED_ANT_TEST_METHODS=testCompoundPartitionKey,testStaticTable"
+  echo "                   -e REPEATED_ANT_TEST_VNODES=false"
+  echo "                   -e REPEATED_ANT_TEST_COUNT=500"
   echo "                  For the complete list of environment variables, please check the"
   echo "                  list of examples in config-2_1.yml and/or the documentation."
   echo "                  If you want to specify multiple environment variables simply add"
@@ -72,7 +89,7 @@ while getopts "e:almhf" opt; do
           ;;
       h ) highres=true
           ;;
-      e ) if (!($has_env_vars)); then
+      e ) if (! ($has_env_vars)); then
             env_vars="$OPTARG"
           else
             env_vars="$env_vars|$OPTARG"
@@ -96,23 +113,32 @@ if $has_env_vars && $check_env_vars; then
     key=$(echo $entry | tr "=" "\n" | head -n 1)
     if [ "$key" != "DTEST_REPO" ] &&
        [ "$key" != "DTEST_BRANCH" ] &&
-       [ "$key" != "REPEATED_UTEST_TARGET" ] &&
-       [ "$key" != "REPEATED_UTEST_CLASS" ] &&
-       [ "$key" != "REPEATED_UTEST_METHODS" ] &&
-       [ "$key" != "REPEATED_UTEST_VNODES" ] &&
-       [ "$key" != "REPEATED_UTEST_COUNT" ] &&
-       [ "$key" != "REPEATED_UTEST_STOP_ON_FAILURE" ] &&
-       [ "$key" != "REPEATED_DTEST_NAME" ] &&
-       [ "$key" != "REPEATED_DTEST_VNODES" ] &&
-       [ "$key" != "REPEATED_DTEST_COUNT" ] &&
-       [ "$key" != "REPEATED_DTEST_STOP_ON_FAILURE" ] &&
-       [ "$key" != "REPEATED_UPGRADE_DTEST_NAME" ] &&
-       [ "$key" != "REPEATED_UPGRADE_DTEST_COUNT" ] &&
-       [ "$key" != "REPEATED_UPGRADE_DTEST_STOP_ON_FAILURE" ] &&
-       [ "$key" != "REPEATED_JVM_UPGRADE_DTEST_CLASS" ] &&
-       [ "$key" != "REPEATED_JVM_UPGRADE_DTEST_METHODS" ] &&
-       [ "$key" != "REPEATED_JVM_UPGRADE_DTEST_COUNT" ] &&
-       [ "$key" != "REPEATED_JVM_UPGRADE_DTEST_STOP_ON_FAILURE" ]; then
+       [ "$key" != "REPEATED_TESTS_STOP_ON_FAILURE" ] &&
+       [ "$key" != "REPEATED_UTESTS" ] &&
+       [ "$key" != "REPEATED_UTESTS_COUNT" ] &&
+       [ "$key" != "REPEATED_UTESTS_FQLTOOL" ] &&
+       [ "$key" != "REPEATED_UTESTS_FQLTOOL_COUNT" ] &&
+       [ "$key" != "REPEATED_UTESTS_LONG" ] &&
+       [ "$key" != "REPEATED_UTESTS_LONG_COUNT" ] &&
+       [ "$key" != "REPEATED_UTESTS_STRESS" ] &&
+       [ "$key" != "REPEATED_UTESTS_STRESS_COUNT" ] &&
+       [ "$key" != "REPEATED_SIMULATOR_DTESTS" ] &&
+       [ "$key" != "REPEATED_SIMULATOR_DTESTS_COUNT" ] &&
+       [ "$key" != "REPEATED_JVM_DTESTS" ] &&
+       [ "$key" != "REPEATED_JVM_DTESTS_COUNT" ] &&
+       [ "$key" != "REPEATED_JVM_UPGRADE_DTESTS" ]  &&
+       [ "$key" != "REPEATED_JVM_UPGRADE_DTESTS_COUNT" ]  &&
+       [ "$key" != "REPEATED_DTESTS" ] &&
+       [ "$key" != "REPEATED_DTESTS_COUNT" ] &&
+       [ "$key" != "REPEATED_LARGE_DTESTS" ] &&
+       [ "$key" != "REPEATED_LARGE_DTESTS_COUNT" ] &&
+       [ "$key" != "REPEATED_UPGRADE_DTESTS" ] &&
+       [ "$key" != "REPEATED_UPGRADE_DTESTS_COUNT" ] &&
+       [ "$key" != "REPEATED_ANT_TEST_TARGET" ] &&
+       [ "$key" != "REPEATED_ANT_TEST_CLASS" ] &&
+       [ "$key" != "REPEATED_ANT_TEST_METHODS" ] &&
+       [ "$key" != "REPEATED_ANT_TEST_VNODES" ] &&
+       [ "$key" != "REPEATED_ANT_TEST_COUNT" ]; then
       die "Unrecognised environment variable name: $key"
     fi
   done
@@ -165,20 +191,144 @@ elif $all; then
   # copy lower into config.yml to make sure this gets updated
   cp $BASEDIR/config.yml.LOWRES $BASEDIR/config.yml
 
-elif (!($has_env_vars)); then
+elif (! ($has_env_vars)); then
   print_help
+  exit 0
+fi
+
+# add new or modified tests to the sets of tests to be repeated
+if (! ($all)); then
+  add_diff_tests ()
+  {
+    dir="${BASEDIR}/../${2}"
+    diff=$(git --no-pager diff --name-only --diff-filter=AMR ${BASE_BRANCH}...HEAD ${dir})
+    tests=$( echo "$diff" \
+           | grep "Test\\.java" \
+           | sed -e "s/\\.java//" \
+           | sed -e "s,^${2},," \
+           | tr  '/' '.' \
+           | grep ${3} )
+    for test in $tests; do
+      echo "  $test"
+      has_env_vars=true
+      if echo "$env_vars" | grep -q "${1}="; then
+        env_vars=$(echo "$env_vars" | sed -e "s/${1}=/${1}=${test},/")
+      elif [ -z "$env_vars" ]; then
+        env_vars="${1}=${test}"
+      else
+        env_vars="$env_vars|${1}=${test}"
+      fi
+    done
+  }
+
+  echo
+  echo "Detecting new or modified tests with git diff --diff-filter=AMR ${BASE_BRANCH}...HEAD:"
+  add_diff_tests "REPEATED_UTESTS" "test/unit/" "org.apache.cassandra"
+  add_diff_tests "REPEATED_UTESTS_LONG" "test/long/" "org.apache.cassandra"
+  add_diff_tests "REPEATED_UTESTS_STRESS" "tools/stress/test/unit/" "org.apache.cassandra.stress"
+  add_diff_tests "REPEATED_UTESTS_FQLTOOL" "tools/fqltool/test/unit/" "org.apache.cassandra.fqltool"
+  add_diff_tests "REPEATED_SIMULATOR_DTESTS" "test/simulator/test/" "org.apache.cassandra.simulator.test"
+  add_diff_tests "REPEATED_JVM_DTESTS" "test/distributed/" "org.apache.cassandra.distributed.test"
+  add_diff_tests "REPEATED_JVM_UPGRADE_DTESTS" "test/distributed/" "org.apache.cassandra.distributed.upgrade"
 fi
 
 # replace environment variables
 if $has_env_vars; then
+  echo
+  echo "Setting environment variables:"
   IFS='='
   echo "$env_vars" | tr '|' '\n' | while read entry; do
     set -- $entry
     key=$1
     val=$2
-    echo "Setting environment variable $key: $val"
+    echo "  $key: $val"
     sed -i.bak "s|- $key:.*|- $key: $val|" $BASEDIR/config.yml
   done
   unset IFS
 fi
 
+# Define function to remove unneeded jobs.
+# The first argument is the file name, and the second arguemnt is the job name.
+delete_job()
+{
+  delete_yaml_block()
+  {
+    sed -Ei.bak "/^    - ${2}/,/^    [^[:space:]]+|^  [^[:space:]]+/{//!d;}" "$1"
+    sed -Ei.bak "/^    - ${2}/d" "$1"
+  }
+  file="$BASEDIR/$1"
+  delete_yaml_block "$file" "${2}"
+  delete_yaml_block "$file" "start_${2}"
+}
+
+# Define function to remove any unneeded repeated jobs.
+# The first and only argument is the file name.
+delete_repeated_jobs()
+{
+  if (! (echo "$env_vars" | grep -q "REPEATED_UTESTS=" )); then
+    delete_job "$1" "j8_unit_tests_repeat"
+    delete_job "$1" "j11_unit_tests_repeat"
+    delete_job "$1" "j8_utests_cdc_repeat"
+    delete_job "$1" "j11_utests_cdc_repeat"
+    delete_job "$1" "j8_utests_compression_repeat"
+    delete_job "$1" "j11_utests_compression_repeat"
+    delete_job "$1" "j8_utests_trie_repeat"
+    delete_job "$1" "j11_utests_trie_repeat"
+    delete_job "$1" "j8_utests_system_keyspace_directory_repeat"
+    delete_job "$1" "j11_utests_system_keyspace_directory_repeat"
+  fi
+  if (! (echo "$env_vars" | grep -q "REPEATED_UTESTS_LONG=")); then
+    delete_job "$1" "j8_utests_long_repeat"
+    delete_job "$1" "j11_utests_long_repeat"
+  fi
+  if (! (echo "$env_vars" | grep -q "REPEATED_UTESTS_STRESS=")); then
+    delete_job "$1" "j8_utests_stress_repeat"
+    delete_job "$1" "j11_utests_stress_repeat"
+  fi
+  if (! (echo "$env_vars" | grep -q "REPEATED_UTESTS_FQLTOOL=")); then
+    delete_job "$1" "j8_utests_fqltool_repeat"
+    delete_job "$1" "j11_utests_fqltool_repeat"
+  fi
+  if (! (echo "$env_vars" | grep -q "REPEATED_SIMULATOR_DTESTS=")); then
+    delete_job "$1" "j8_simulator_dtests_repeat"
+    delete_job "$1" "j11_simulator_dtests_repeat"
+  fi
+  if (! (echo "$env_vars" | grep -q "REPEATED_JVM_DTESTS=")); then
+    delete_job "$1" "j8_jvm_dtests_repeat"
+    delete_job "$1" "j8_jvm_dtests_vnode_repeat"
+    delete_job "$1" "j11_jvm_dtests_repeat"
+    delete_job "$1" "j11_jvm_dtests_vnode_repeat"
+  fi
+  if (! (echo "$env_vars" | grep -q "REPEATED_JVM_UPGRADE_DTESTS=")); then
+    delete_job "$1" "start_jvm_upgrade_dtests_repeat"
+    delete_job "$1" "j8_jvm_upgrade_dtests_repeat"
+  fi
+  if (! (echo "$env_vars" | grep -q "REPEATED_DTESTS=")); then
+    delete_job "$1" "j8_dtests_repeat"
+    delete_job "$1" "j8_dtests_vnode_repeat"
+    delete_job "$1" "j8_dtests_offheap_repeat"
+    delete_job "$1" "j11_dtests_repeat"
+    delete_job "$1" "j11_dtests_vnode_repeat"
+    delete_job "$1" "j11_dtests_offheap_repeat"
+  fi
+  if (! (echo "$env_vars" | grep -q "REPEATED_LARGE_DTESTS=")); then
+    delete_job "$1" "j8_dtests_large_repeat"
+    delete_job "$1" "j8_dtests_large_vnode_repeat"
+    delete_job "$1" "j11_dtests_large_repeat"
+    delete_job "$1" "j11_dtests_large_vnode_repeat"
+  fi
+  if (! (echo "$env_vars" | grep -q "REPEATED_UPGRADE_DTESTS=")); then
+    delete_job "$1" "j8_upgrade_dtests_repeat"
+  fi
+  if (! (echo "$env_vars" | grep -q "REPEATED_ANT_TEST_CLASS=")); then
+    delete_job "$1" "j8_repeated_ant_test"
+    delete_job "$1" "j11_repeated_ant_test"
+  fi
+}
+
+delete_repeated_jobs "config.yml"
+if $all; then
+  delete_repeated_jobs "config.yml.LOWRES"
+  delete_repeated_jobs "config.yml.MIDRES"
+  delete_repeated_jobs "config.yml.HIGHRES"
+fi

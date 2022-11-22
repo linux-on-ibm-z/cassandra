@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db.memtable;
 
+import java.nio.ByteBuffer;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentNavigableMap;
@@ -36,9 +37,10 @@ import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.partitions.AbstractBTreePartition;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.AtomicBTreePartition;
+import org.apache.cassandra.db.partitions.BTreePartitionData;
+import org.apache.cassandra.db.partitions.BTreePartitionUpdater;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -52,11 +54,11 @@ import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.Cloner;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
+import org.apache.cassandra.utils.memory.NativeAllocator;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_OVERHEAD_COMPUTE_STEPS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_OVERHEAD_SIZE;
@@ -87,12 +89,6 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
     protected SkipListMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
         super(commitLogLowerBound, metadataRef, owner);
-    }
-
-    @Override
-    protected Factory factory()
-    {
-        return FACTORY;
     }
 
     @Override
@@ -131,14 +127,14 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
             }
         }
 
-        long[] pair = previous.addAllWithSizeDelta(update, cloner, opGroup, indexer);
+        BTreePartitionUpdater updater = previous.addAll(update, cloner, opGroup, indexer);
         updateMin(minTimestamp, update.stats().minTimestamp);
         updateMin(minLocalDeletionTime, update.stats().minLocalDeletionTime);
-        liveDataSize.addAndGet(initialSize + pair[0]);
+        liveDataSize.addAndGet(initialSize + updater.dataSize);
         columnsCollector.update(update.columns());
         statsCollector.update(update.stats());
         currentOperations.addAndGet(update.operationCount());
-        return pair[1];
+        return updater.colUpdateTimeDelta;
     }
 
     @Override
@@ -227,13 +223,18 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
             Cloner cloner = allocator.cloner(group);
             ConcurrentNavigableMap<PartitionPosition, Object> partitions = new ConcurrentSkipListMap<>();
             final Object val = new Object();
+            final int testBufferSize = 8;
             for (int i = 0 ; i < count ; i++)
-                partitions.put(cloner.clone(new BufferDecoratedKey(new LongToken(i), ByteBufferUtil.EMPTY_BYTE_BUFFER)), val);
-            double avgSize = ObjectSizes.measureDeep(partitions) / (double) count;
+                partitions.put(cloner.clone(new BufferDecoratedKey(new LongToken(i), ByteBuffer.allocate(testBufferSize))), val);
+            double avgSize = ObjectSizes.measureDeepOmitShared(partitions) / (double) count;
             rowOverhead = (int) ((avgSize - Math.floor(avgSize)) < 0.05 ? Math.floor(avgSize) : Math.ceil(avgSize));
-            rowOverhead -= ObjectSizes.measureDeep(new LongToken(0));
+            rowOverhead -= new LongToken(0).getHeapSize();
             rowOverhead += AtomicBTreePartition.EMPTY_SIZE;
-            rowOverhead += AbstractBTreePartition.HOLDER_UNSHARED_HEAP_SIZE;
+            rowOverhead += BTreePartitionData.UNSHARED_HEAP_SIZE;
+            if (!(allocator instanceof NativeAllocator))
+                rowOverhead -= testBufferSize;  // measureDeepOmitShared includes the given number of bytes even for
+                                                // off-heap buffers, but not for direct memory.
+            // Decorated key overhead with byte buffer (if needed) is included
             allocator.setDiscarding();
             allocator.setDiscarded();
             return rowOverhead;

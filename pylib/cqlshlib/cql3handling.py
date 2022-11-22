@@ -47,11 +47,13 @@ class Cql3ParsingRuleSet(CqlParsingRuleSet):
         ('bloom_filter_fp_chance', None),
         ('comment', None),
         ('gc_grace_seconds', None),
+        ('incremental_backups', None),
         ('min_index_interval', None),
         ('max_index_interval', None),
         ('default_time_to_live', None),
         ('speculative_retry', None),
         ('additional_write_policy', None),
+        ('memtable', None),
         ('memtable_flush_period_in_ms', None),
         ('cdc', None),
         ('read_repair', None),
@@ -389,6 +391,11 @@ completer_for('property', 'propeq')(prop_equals_completer)
 def prop_name_completer(ctxt, cass):
     if working_on_keyspace(ctxt):
         return ks_prop_name_completer(ctxt, cass)
+    elif 'MATERIALIZED' == ctxt.get_binding('wat', '').upper():
+        props = cf_prop_name_completer(ctxt, cass)
+        props.remove('default_time_to_live')
+        props.remove('gc_grace_seconds')
+        return props
     else:
         return cf_prop_name_completer(ctxt, cass)
 
@@ -516,6 +523,8 @@ def cf_prop_val_completer(ctxt, cass):
     if this_opt in ('read_repair'):
         return [Hint('<\'none\'|\'blocking\'>')]
     if this_opt == 'allow_auto_snapshot':
+        return [Hint('<boolean>')]
+    if this_opt == 'incremental_backups':
         return [Hint('<boolean>')]
     return [Hint('<option_value>')]
 
@@ -700,7 +709,7 @@ def get_ut_layout(ctxt, cass):
 
 
 def working_on_keyspace(ctxt):
-    wat = ctxt.get_binding('wat').upper()
+    wat = ctxt.get_binding('wat', '').upper()
     if wat in ('KEYSPACE', 'SCHEMA'):
         return True
     return False
@@ -1295,12 +1304,19 @@ syntax_rules += r'''
                                ( "USING" <stringLiteral> ( "WITH" "OPTIONS" "=" <mapLiteral> )? )?
                          ;
 
-<createMaterializedViewStatement> ::= "CREATE" "MATERIALIZED" "VIEW" ("IF" "NOT" "EXISTS")? <materializedViewName>?
-                                      "AS" <selectStatement>
-                                      "PRIMARY" "KEY" <pkDef>
+
+<colList> ::= "(" <cident> ( "," <cident> )* ")"
+          ;
+
+<createMaterializedViewStatement> ::= "CREATE" wat="MATERIALIZED" "VIEW" ("IF" "NOT" "EXISTS")? viewname=<materializedViewName>?
+                                      "AS" "SELECT" <selectClause>
+                                      "FROM" cf=<columnFamilyName>
+                                      "WHERE" <cident> "IS" "NOT" "NULL" ( "AND" <cident> "IS" "NOT" "NULL")*
+                                      "PRIMARY" "KEY" (<colList> | ( "(" <colList> ( "," <cident> )* ")" ))
+                                      ( "WITH" <cfamProperty> ( "AND" <cfamProperty> )* )?
                                     ;
 
-<createUserTypeStatement> ::= "CREATE" "TYPE" ( ks=<nonSystemKeyspaceName> dot="." )? typename=<cfOrKsName> "(" newcol=<cident> <storageType>
+<createUserTypeStatement> ::= "CREATE" "TYPE" ("IF" "NOT" "EXISTS")? ( ks=<nonSystemKeyspaceName> dot="." )? typename=<cfOrKsName> "(" newcol=<cident> <storageType>
                                 ( "," [newcolname]=<cident> <storageType> )*
                             ")"
                          ;
@@ -1331,6 +1347,7 @@ syntax_rules += r'''
 '''
 
 explain_completion('createIndexStatement', 'indexname', '<new_index_name>')
+explain_completion('createMaterializedViewStatement', 'viewname', '<new_view_name>')
 explain_completion('createUserTypeStatement', 'typename', '<new_type_name>')
 explain_completion('createUserTypeStatement', 'newcol', '<new_field_name>')
 
@@ -1363,7 +1380,7 @@ syntax_rules += r'''
 <dropMaterializedViewStatement> ::= "DROP" "MATERIALIZED" "VIEW" ("IF" "EXISTS")? mv=<materializedViewName>
                                   ;
 
-<dropUserTypeStatement> ::= "DROP" "TYPE" ut=<userTypeName>
+<dropUserTypeStatement> ::= "DROP" "TYPE" ( "IF" "EXISTS" )? ut=<userTypeName>
                           ;
 
 <dropFunctionStatement> ::= "DROP" "FUNCTION" ( "IF" "EXISTS" )? <userFunctionName>
@@ -1474,12 +1491,12 @@ syntax_rules += r'''
              | <unreservedKeyword>
              ;
 
-<createRoleStatement> ::= "CREATE" "ROLE" <rolename>
+<createRoleStatement> ::= "CREATE" "ROLE" ("IF" "NOT" "EXISTS")? <rolename>
                               ( "WITH" <roleProperty> ("AND" <roleProperty>)*)?
                         ;
 
 <alterRoleStatement> ::= "ALTER" "ROLE" ("IF" "EXISTS")? <rolename>
-                              ( "WITH" <roleProperty> ("AND" <roleProperty>)*)?
+                              ( "WITH" <roleProperty> ("AND" <roleProperty>)*)
                        ;
 
 <roleProperty> ::= (("HASHED")? "PASSWORD") "=" <stringLiteral>
@@ -1490,7 +1507,7 @@ syntax_rules += r'''
                  | "ACCESS" "TO" "ALL" "DATACENTERS"
                  ;
 
-<dropRoleStatement> ::= "DROP" "ROLE" <rolename>
+<dropRoleStatement> ::= "DROP" "ROLE" ("IF" "EXISTS")? <rolename>
                       ;
 
 <grantRoleStatement> ::= "GRANT" <rolename> "TO" <rolename>

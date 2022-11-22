@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -319,6 +320,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     private final SSTableImporter sstableImporter;
 
     private volatile boolean compactionSpaceCheck = true;
+
+    // Tombtone partitions that ignore the gc_grace_seconds during compaction
+    private final Set<DecoratedKey> partitionKeySetIgnoreGcGrace = ConcurrentHashMap.newKeySet();
 
     @VisibleForTesting
     final DiskBoundaryManager diskBoundaryManager = new DiskBoundaryManager();
@@ -1451,39 +1455,61 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     @Override
     public ShardBoundaries localRangeSplits(int shardCount)
     {
-        if (shardCount == 1 || !getPartitioner().splitter().isPresent() || SchemaConstants.isLocalSystemKeyspace(keyspace.getName()))
+        if (shardCount == 1 || !getPartitioner().splitter().isPresent())
             return ShardBoundaries.NONE;
 
         ShardBoundaries shardBoundaries = cachedShardBoundaries;
+
         if (shardBoundaries == null ||
             shardBoundaries.shardCount() != shardCount ||
-            shardBoundaries.ringVersion != StorageService.instance.getTokenMetadata().getRingVersion())
+            shardBoundaries.ringVersion != -1 && shardBoundaries.ringVersion != StorageService.instance.getTokenMetadata().getRingVersion())
         {
-            DiskBoundaryManager.VersionedRangesAtEndpoint versionedLocalRanges = DiskBoundaryManager.getVersionedLocalRanges(this);
-            Set<Range<Token>> localRanges = versionedLocalRanges.rangesAtEndpoint.ranges();
             List<Splitter.WeightedRange> weightedRanges;
-            if (localRanges.isEmpty())
-                weightedRanges = ImmutableList.of(new Splitter.WeightedRange(1.0, new Range<>(getPartitioner().getMinimumToken(), getPartitioner().getMaximumToken())));
+            long ringVersion;
+            if (!SchemaConstants.isLocalSystemKeyspace(keyspace.getName())
+                && getPartitioner() == StorageService.instance.getTokenMetadata().partitioner)
+            {
+                DiskBoundaryManager.VersionedRangesAtEndpoint versionedLocalRanges = DiskBoundaryManager.getVersionedLocalRanges(this);
+                Set<Range<Token>> localRanges = versionedLocalRanges.rangesAtEndpoint.ranges();
+                ringVersion = versionedLocalRanges.ringVersion;
+
+                if (!localRanges.isEmpty())
+                {
+                    weightedRanges = new ArrayList<>(localRanges.size());
+                    for (Range<Token> r : localRanges)
+                    {
+                        // WeightedRange supports only unwrapped ranges as it relies
+                        // on right - left == num tokens equality
+                        for (Range<Token> u: r.unwrap())
+                            weightedRanges.add(new Splitter.WeightedRange(1.0, u));
+                    }
+                    weightedRanges.sort(Comparator.comparing(Splitter.WeightedRange::left));
+                }
+                else
+                {
+                    weightedRanges = fullWeightedRange();
+                }
+            }
             else
             {
-                weightedRanges = new ArrayList<>(localRanges.size());
-                for (Range<Token> r : localRanges)
-                {
-                    // WeightedRange supports only unwrapped ranges as it relies
-                    // on right - left == num tokens equality
-                    for (Range<Token> u: r.unwrap())
-                        weightedRanges.add(new Splitter.WeightedRange(1.0, u));
-                }
-                weightedRanges.sort(Comparator.comparing(Splitter.WeightedRange::left));
+                // Local tables need to cover the full token range and don't care about ring changes.
+                // We also end up here if the table's partitioner is not the database's, which can happen in tests.
+                weightedRanges = fullWeightedRange();
+                ringVersion = -1;
             }
 
             List<Token> boundaries = getPartitioner().splitter().get().splitOwnedRanges(shardCount, weightedRanges, false);
             shardBoundaries = new ShardBoundaries(boundaries.subList(0, boundaries.size() - 1),
-                                                  versionedLocalRanges.ringVersion);
+                                                  ringVersion);
             cachedShardBoundaries = shardBoundaries;
             logger.debug("Memtable shard boundaries for {}.{}: {}", keyspace.getName(), getTableName(), boundaries);
         }
         return shardBoundaries;
+    }
+
+    private ImmutableList<Splitter.WeightedRange> fullWeightedRange()
+    {
+        return ImmutableList.of(new Splitter.WeightedRange(1.0, new Range<>(getPartitioner().getMinimumToken(), getPartitioner().getMaximumToken())));
     }
 
     /**
@@ -2394,6 +2420,31 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         CompactionManager.instance.forceCompactionForKey(this, key);
     }
 
+    public void forceCompactionKeysIgnoringGcGrace(String... partitionKeysIgnoreGcGrace)
+    {
+        List<DecoratedKey> decoratedKeys = new ArrayList<>();
+        try
+        {
+            partitionKeySetIgnoreGcGrace.clear();
+
+            for (String key : partitionKeysIgnoreGcGrace) {
+                DecoratedKey dk = decorateKey(metadata().partitionKeyType.fromString(key));
+                partitionKeySetIgnoreGcGrace.add(dk);
+                decoratedKeys.add(dk);
+            }
+
+            CompactionManager.instance.forceCompactionForKeys(this, decoratedKeys);
+        } finally
+        {
+            partitionKeySetIgnoreGcGrace.clear();
+        }
+    }
+
+    public boolean shouldIgnoreGcGraceForKey(DecoratedKey dk)
+    {
+        return partitionKeySetIgnoreGcGrace.contains(dk);
+    }
+
     public static Iterable<ColumnFamilyStore> all()
     {
         List<Iterable<ColumnFamilyStore>> stores = new ArrayList<>(Schema.instance.getKeyspaces().size());
@@ -3083,6 +3134,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return metadata().params.allowAutoSnapshot && DatabaseDescriptor.isAutoSnapshot();
     }
 
+    public boolean isTableIncrementalBackupsEnabled()
+    {
+        return DatabaseDescriptor.isIncrementalBackupsEnabled() && metadata().params.incrementalBackups;
+    }
+
     /**
      * Discard all SSTables that were created before given timestamp.
      *
@@ -3180,6 +3236,36 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public static TableMetrics metricsFor(TableId tableId)
     {
         return Objects.requireNonNull(getIfExists(tableId)).metric;
+    }
+
+    /**
+     * Grabs the global first/last tokens among sstables and returns the range of data directories that start/end with those tokens.
+     *
+     * This is done to avoid grabbing the disk boundaries for every sstable in case of huge compactions.
+     */
+    public List<File> getDirectoriesForFiles(Set<SSTableReader> sstables)
+    {
+        Directories.DataDirectory[] writeableLocations = directories.getWriteableLocations();
+        if (writeableLocations.length == 1 || sstables.isEmpty())
+        {
+            List<File> ret = new ArrayList<>(writeableLocations.length);
+            for (Directories.DataDirectory ddir : writeableLocations)
+                ret.add(getDirectories().getLocationForDisk(ddir));
+            return ret;
+        }
+
+        DecoratedKey first = null;
+        DecoratedKey last = null;
+        for (SSTableReader sstable : sstables)
+        {
+            if (first == null || first.compareTo(sstable.first) > 0)
+                first = sstable.first;
+            if (last == null || last.compareTo(sstable.last) < 0)
+                last = sstable.last;
+        }
+
+        DiskBoundaries diskBoundaries = getDiskBoundaries();
+        return diskBoundaries.getDisksInBounds(first, last).stream().map(directories::getLocationForDisk).collect(Collectors.toList());
     }
 
     public DiskBoundaries getDiskBoundaries()

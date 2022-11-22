@@ -20,6 +20,7 @@ package org.apache.cassandra.config;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.db.virtual.LogMessagesTable;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.FileSystemOwnershipCheck;
 
@@ -154,6 +155,11 @@ public enum CassandraRelevantProperties
     BOOTSTRAP_SCHEMA_DELAY_MS("cassandra.schema_delay_ms"),
 
     /**
+     * Whether we reset any found data from previously run bootstraps.
+     */
+    RESET_BOOTSTRAP_PROGRESS("cassandra.reset_bootstrap_progress"),
+
+    /**
      * When draining, how long to wait for mutating executors to shutdown.
      */
     DRAIN_EXECUTOR_TIMEOUT_MS("cassandra.drain_executor_timeout_ms", String.valueOf(TimeUnit.MINUTES.toMillis(5))),
@@ -234,6 +240,7 @@ public enum CassandraRelevantProperties
 
     MEMTABLE_OVERHEAD_SIZE("cassandra.memtable.row_overhead_size", "-1"),
     MEMTABLE_OVERHEAD_COMPUTE_STEPS("cassandra.memtable_row_overhead_computation_step", "100000"),
+    MEMTABLE_TRIE_SIZE_LIMIT("cassandra.trie_size_limit_mb"),
     MIGRATION_DELAY("cassandra.migration_delay_ms", "60000"),
     /** Defines how often schema definitions are pulled from the other nodes */
     SCHEMA_PULL_INTERVAL_MS("cassandra.schema_pull_interval_ms", "60000"),
@@ -299,8 +306,15 @@ public enum CassandraRelevantProperties
     ORG_APACHE_CASSANDRA_DB_VIRTUAL_SYSTEM_PROPERTIES_TABLE_TEST("org.apache.cassandra.db.virtual.SystemPropertiesTableTest"),
 
     // Loosen the definition of "empty" for gossip state, for use during host replacements if things go awry
-    LOOSE_DEF_OF_EMPTY_ENABLED(Config.PROPERTY_PREFIX + "gossiper.loose_empty_enabled");
+    LOOSE_DEF_OF_EMPTY_ENABLED(Config.PROPERTY_PREFIX + "gossiper.loose_empty_enabled"),
+
+    // Maximum number of rows in system_views.logs table
+    LOGS_VIRTUAL_TABLE_MAX_ROWS("cassandra.virtual.logs.max.rows", Integer.toString(LogMessagesTable.LOGS_VIRTUAL_TABLE_DEFAULT_ROWS)),
+
+    /** Used when running in Client mode and the system and schema keyspaces need to be initialized outside of their normal initialization path **/
+    FORCE_LOAD_LOCAL_KEYSPACES("cassandra.schema.force_load_local_keyspaces"),
     ;
+
 
 
     CassandraRelevantProperties(String key, String defaultVal)
@@ -406,6 +420,14 @@ public enum CassandraRelevantProperties
     public void setBoolean(boolean value)
     {
         System.setProperty(key, Boolean.toString(value));
+    }
+
+    /**
+     * Clears the value set in the system property.
+     */
+    public void clearValue()
+    {
+        System.clearProperty(key);
     }
 
     /**

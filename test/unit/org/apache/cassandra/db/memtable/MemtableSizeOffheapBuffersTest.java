@@ -16,28 +16,31 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.db;
+package org.apache.cassandra.db.memtable;
 
 import org.junit.Assert;
-import org.junit.Test;
+import org.junit.BeforeClass;
 
-public class ClusteringBoundTest
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.utils.memory.MemtablePool;
+import org.apache.cassandra.utils.memory.SlabPool;
+
+public class MemtableSizeOffheapBuffersTest extends MemtableSizeTestBase
 {
-    @Test
-    public void arrayTopAndBottom()
+    // Overrides CQLTester.setUpClass to run before it
+    @BeforeClass
+    public static void setUpClass()
     {
-        Assert.assertTrue(ArrayClusteringBound.BOTTOM.isBottom());
-        Assert.assertFalse(ArrayClusteringBound.BOTTOM.isTop());
-        Assert.assertTrue(ArrayClusteringBound.TOP.isTop());
-        Assert.assertFalse(ArrayClusteringBound.TOP.isBottom());
+        setup(Config.MemtableAllocationType.offheap_buffers);
     }
 
-    @Test
-    public void bufferTopAndBottom()
+
+    @Override
+    void checkMemtablePool()
     {
-        Assert.assertTrue(BufferClusteringBound.BOTTOM.isBottom());
-        Assert.assertFalse(BufferClusteringBound.BOTTOM.isTop());
-        Assert.assertTrue(BufferClusteringBound.TOP.isTop());
-        Assert.assertFalse(BufferClusteringBound.TOP.isBottom());
+        MemtablePool memoryPool = AbstractAllocatorMemtable.MEMORY_POOL;
+        logger.info("Memtable pool {} off-heap limit {}", memoryPool, memoryPool.offHeap.limit);
+        Assert.assertTrue(memoryPool instanceof SlabPool);
+        Assert.assertTrue(memoryPool.offHeap.limit > 0);
     }
 }

@@ -788,6 +788,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public synchronized void initServer(int schemaTimeoutMillis, int ringTimeoutMillis) throws ConfigurationException
     {
         logger.info("Cassandra version: {}", FBUtilities.getReleaseVersionString());
+        logger.info("Git SHA: {}", FBUtilities.getGitSHA());
         logger.info("CQL version: {}", QueryProcessor.CQL_VERSION);
         logger.info("Native protocol supported versions: {} (default: {})",
                     StringUtils.join(ProtocolVersion.supportedVersions(), ", "), ProtocolVersion.CURRENT);
@@ -1279,15 +1280,26 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void rebuild(String sourceDc)
     {
-        rebuild(sourceDc, null, null, null);
+        rebuild(sourceDc, null, null, null, false);
     }
 
     public void rebuild(String sourceDc, String keyspace, String tokens, String specificSources)
+    {
+        rebuild(sourceDc, keyspace, tokens, specificSources, false);
+    }
+
+    public void rebuild(String sourceDc, String keyspace, String tokens, String specificSources, boolean excludeLocalDatacenterNodes)
     {
         // check ongoing rebuild
         if (!isRebuilding.compareAndSet(false, true))
         {
             throw new IllegalStateException("Node is still rebuilding. Check nodetool netstats.");
+        }
+
+        // fail if source DC is local and --exclude-local-dc is set
+        if (sourceDc != null && sourceDc.equals(DatabaseDescriptor.getLocalDataCenter()) && excludeLocalDatacenterNodes)
+        {
+            throw new IllegalArgumentException("Cannot set source data center to be local data center, when excludeLocalDataCenter flag is set");
         }
 
         try
@@ -1315,6 +1327,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                                                        DatabaseDescriptor.getStreamingConnectionsPerHost());
             if (sourceDc != null)
                 streamer.addSourceFilter(new RangeStreamer.SingleDatacenterFilter(DatabaseDescriptor.getEndpointSnitch(), sourceDc));
+
+            if (excludeLocalDatacenterNodes)
+                streamer.addSourceFilter(new RangeStreamer.ExcludeLocalDatacenterFilter(DatabaseDescriptor.getEndpointSnitch()));
 
             if (keyspace == null)
             {
@@ -1945,7 +1960,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (Boolean.getBoolean("cassandra.reset_bootstrap_progress"))
         {
             logger.info("Resetting bootstrap progress to start fresh");
-            SystemKeyspace.resetAvailableRanges();
+            SystemKeyspace.resetAvailableStreamedRanges();
         }
 
         // Force disk boundary invalidation now that local tokens are set
@@ -2158,10 +2173,31 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 throw new RuntimeException(e);
             }
         }
-        else if (Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.RPC_ADDRESS) == null)
-            return endpoint.getAddress().getHostAddress() + ":" + DatabaseDescriptor.getNativeTransportPort();
         else
-            return Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.RPC_ADDRESS).value + ":" + DatabaseDescriptor.getNativeTransportPort();
+        {
+             final String ipAddress;
+             // If RPC_ADDRESS present in gossip for this endpoint use it.  This is expected for 3.x nodes.
+             if (Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.RPC_ADDRESS) != null)
+             {
+                 ipAddress = Gossiper.instance.getEndpointStateForEndpoint(endpoint).getApplicationState(ApplicationState.RPC_ADDRESS).value;
+             }
+             else
+             {
+                 // otherwise just use the IP of the endpoint itself.
+                 ipAddress = endpoint.getHostAddress(false);
+             }
+
+             // include the configured native_transport_port.
+             try
+             {
+                 InetAddressAndPort address = InetAddressAndPort.getByNameOverrideDefaults(ipAddress, DatabaseDescriptor.getNativeTransportPort());
+                 return address.getHostAddress(withPort);
+             }
+             catch (UnknownHostException e)
+             {
+                 throw new RuntimeException(e);
+             }
+         }
     }
 
     public Map<List<String>, List<String>> getRangeToRpcaddressMap(String keyspace)
@@ -3638,6 +3674,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return FBUtilities.getReleaseVersionString();
     }
 
+    @Override
+    public String getGitSHA()
+    {
+        return FBUtilities.getGitSHA();
+    }
+
     public String getSchemaVersion()
     {
         return Schema.instance.getVersion().toString();
@@ -4042,6 +4084,24 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             cfStore.forceCompactionForKey(getKeyFromPartition(keyspaceName, cfStore.name, partitionKey));
         }
+    }
+
+    /***
+     * Forces compaction for a list of partition keys in a table
+     * The method will ignore the gc_grace_seconds for the partitionKeysIgnoreGcGrace during the comapction,
+     * in order to purge the tombstones and free up space quicker.
+     * @param keyspaceName keyspace name
+     * @param tableName table name
+     * @param partitionKeysIgnoreGcGrace partition keys ignoring the gc_grace_seconds
+     * @throws IOException on any I/O operation error
+     * @throws ExecutionException when attempting to retrieve the result of a task that aborted by throwing an exception
+     * @throws InterruptedException when a thread is waiting, sleeping, or otherwise occupied, and the thread is interrupted, either before or during the activity
+     */
+    public void forceCompactionKeysIgnoringGcGrace(String keyspaceName,
+                                                   String tableName, String... partitionKeysIgnoreGcGrace) throws IOException, ExecutionException, InterruptedException
+    {
+        ColumnFamilyStore cfStore = getValidKeyspace(keyspaceName).getColumnFamilyStore(tableName);
+        cfStore.forceCompactionKeysIgnoringGcGrace(partitionKeysIgnoreGcGrace);
     }
 
     /**
@@ -7061,5 +7121,17 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public void setMinTrackedPartitionTombstoneCount(long value)
     {
         DatabaseDescriptor.setMinTrackedPartitionTombstoneCount(value);
+    }
+
+    public void setSkipStreamDiskSpaceCheck(boolean value)
+    {
+        if (value != DatabaseDescriptor.getSkipStreamDiskSpaceCheck())
+            logger.info("Changing skip_stream_disk_space_check from {} to {}", DatabaseDescriptor.getSkipStreamDiskSpaceCheck(), value);
+        DatabaseDescriptor.setSkipStreamDiskSpaceCheck(value);
+    }
+
+    public boolean getSkipStreamDiskSpaceCheck()
+    {
+        return DatabaseDescriptor.getSkipStreamDiskSpaceCheck();
     }
 }

@@ -146,6 +146,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
+import org.apache.cassandra.utils.logging.LoggingSupportFactory;
 import org.apache.cassandra.utils.memory.BufferPools;
 import org.apache.cassandra.utils.progress.jmx.JMXBroadcastExecutor;
 
@@ -590,9 +591,12 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 DistributedTestSnitch.assign(config.networkTopology());
 
                 DatabaseDescriptor.daemonInitialization();
+                LoggingSupportFactory.getLoggingSupport().onStartup();
+
                 FileUtils.setFSErrorHandler(new DefaultFSErrorHandler());
                 DatabaseDescriptor.createAllDirectories();
                 CassandraDaemon.getInstanceForTesting().migrateSystemDataIfNeeded();
+                CassandraDaemon.logSystemInfo(inInstancelogger);
                 CommitLog.instance.start();
 
                 CassandraDaemon.getInstanceForTesting().runStartupChecks();
@@ -725,6 +729,9 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
 
                 ActiveRepairService.instance.start();
                 StreamManager.instance.start();
+
+                PaxosState.startAutoRepairs();
+
                 CassandraDaemon.getInstanceForTesting().completeSetup();
             }
             catch (Throwable t)

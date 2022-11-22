@@ -88,6 +88,8 @@ import org.apache.cassandra.utils.Mx4jTool;
 import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.FutureCombiner;
+import org.apache.cassandra.utils.logging.LoggingSupportFactory;
+import org.apache.cassandra.utils.logging.VirtualTableAppender;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CASSANDRA_FOREGROUND;
@@ -248,7 +250,7 @@ public class CassandraDaemon
 
         ThreadAwareSecurityManager.install();
 
-        logSystemInfo();
+        logSystemInfo(logger);
 
         NativeLibrary.tryMlockall();
 
@@ -480,6 +482,8 @@ public class CassandraDaemon
         else
             logger.info("Prewarming of auth caches is disabled");
 
+        PaxosState.startAutoRepairs();
+
         completeSetup();
     }
 
@@ -566,6 +570,12 @@ public class CassandraDaemon
     {
         VirtualKeyspaceRegistry.instance.register(VirtualSchemaKeyspace.instance);
         VirtualKeyspaceRegistry.instance.register(SystemViewsKeyspace.instance);
+
+        // flush log messages to system_views.system_logs virtual table as there were messages already logged
+        // before that virtual table was instantiated
+        LoggingSupportFactory.getLoggingSupport()
+                             .getAppender(VirtualTableAppender.class, VirtualTableAppender.APPENDER_NAME)
+                             .ifPresent(appender -> ((VirtualTableAppender) appender).flushBuffer());
     }
 
     public void scrubDataDirectories() throws StartupException
@@ -618,7 +628,7 @@ public class CassandraDaemon
         return setupCompleted;
     }
 
-    private void logSystemInfo()
+    public static void logSystemInfo(Logger logger)
     {
     	if (logger.isInfoEnabled())
     	{

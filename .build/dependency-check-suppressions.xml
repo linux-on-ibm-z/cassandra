@@ -24,6 +24,7 @@
         <!-- not applicable since 4.0 -->
         <packageUrl regex="true">^pkg:maven/com\.datastax\.cassandra/cassandra\-driver\-core@.*$</packageUrl>
         <cve>CVE-2018-8016</cve>
+        <cve>CVE-2019-2684</cve>
         <cve>CVE-2020-13946</cve>
         <cve>CVE-2020-17516</cve>
         <cve>CVE-2021-44521</cve>
@@ -58,4 +59,11 @@
         <cve>CVE-2021-43797</cve>
         <cve>CVE-2022-24823</cve>
     </suppress>
+    <!-- https://issues.apache.org/jira/browse/CASSANDRA-17966 -->
+    <suppress>
+        <packageUrl regex="true">^pkg:maven/com\.fasterxml\.jackson\.core/jackson\-databind@.*$</packageUrl>
+        <cve>CVE-2022-42003</cve>
+        <cve>CVE-2022-42004</cve>
+    </suppress>
+
 </suppressions>
