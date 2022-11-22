@@ -75,33 +75,7 @@ pipeline {
                 }
             }
           }
-        }
-        stage('fqltool') {
-          steps {
-              script {
-                def attempt = 1
-                while (attempt <=2) {
-                  if (attempt > 1) {
-                    sleep(60 * attempt)
-                  }
-                  attempt = attempt + 1
-                  fqltool = build job: "${env.JOB_NAME}-fqltool-test", propagate: false
-                  if (fqltool.result != 'FAILURE') break
-                }
-                if (fqltool.result != 'SUCCESS') unstable('fqltool test failures')
-                if (fqltool.result == 'FAILURE') currentBuild.result='FAILURE'
-              }
-          }
-          post {
-            always {
-                warnError('missing test xml files') {
-                    script {
-                        copyTestResults('fqltool-test', fqltool.getNumber())
-                    }
-                }
-            }
-          }
-        }
+        }        
         stage('units') {
           steps {
             script {
