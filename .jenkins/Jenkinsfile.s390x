@@ -128,58 +128,6 @@ pipeline {
             }
           }
         }
-        stage('long units') {
-          steps {
-            script {
-                def attempt = 1
-                while (attempt <=2) {
-                  if (attempt > 1) {
-                    sleep(60 * attempt)
-                  }
-                  attempt = attempt + 1
-                  long_test = build job: "${env.JOB_NAME}-long-test", propagate: false
-                  if (long_test.result != 'FAILURE') break
-              }
-              if (long_test.result != 'SUCCESS') unstable('long unit test failures')
-              if (long_test.result == 'FAILURE') currentBuild.result='FAILURE'
-            }
-          }
-          post {
-            always {
-                warnError('missing test xml files') {
-                    script {
-                        copyTestResults('long-test', long_test.getNumber())
-                    }
-                }
-            }
-          }
-        }
-        stage('burn') {
-          steps {
-            script {
-                def attempt = 1
-                while (attempt <=2) {
-                  if (attempt > 1) {
-                    sleep(60 * attempt)
-                  }
-                  attempt = attempt + 1
-                  burn = build job: "${env.JOB_NAME}-test-burn", propagate: false
-                  if (burn.result != 'FAILURE') break
-              }
-              if (burn.result != 'SUCCESS') unstable('burn test failures')
-              if (burn.result == 'FAILURE') currentBuild.result='FAILURE'
-            }
-          }
-          post {
-            always {
-                warnError('missing test xml files') {
-                    script {
-                        copyTestResults('test-burn', burn.getNumber())
-                    }
-                }
-            }
-          }
-        }
         stage('cdc') {
           steps {
             script {
@@ -259,36 +207,6 @@ pipeline {
             }
         }
       }
-    }
-    stage('Distributed Test') {
-        parallel {
-          stage('jvm-dtest') {
-            steps {
-              script {
-                  def attempt = 1
-                  while (attempt <=2) {
-                    if (attempt > 1) {
-                      sleep(60 * attempt)
-                    }
-                    attempt = attempt + 1
-                    jvm_dtest = build job: "${env.JOB_NAME}-jvm-dtest", propagate: false
-                    if (jvm_dtest.result != 'FAILURE') break
-                  }
-                  if (jvm_dtest.result != 'SUCCESS') unstable('jvm-dtest failures')
-                  if (jvm_dtest.result == 'FAILURE') currentBuild.result='FAILURE'
-              }
-            }
-            post {
-              always {
-                  warnError('missing test xml files') {
-                      script {
-                          copyTestResults('jvm-dtest', jvm_dtest.getNumber())
-                      }
-                  }
-              }
-            }
-          }         
-        }
     }
     stage('Summary') {
       steps {
